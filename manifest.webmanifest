@@ -1,0 +1,13 @@
+{
+  "name": "TechPlast Измерител — AR",
+  "short_name": "Измерител",
+  "description": "AR измерване на отвори за монтажници на терен",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#111111",
+  "theme_color": "#111111",
+  "lang": "bg",
+  "icons": [{"src":"icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+}

@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>TechPlast Измерител — AR</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#111111">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="apple-touch-icon" href="icon.svg">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden;background:#000;font-family:-apple-system,Roboto,Arial,sans-serif}
+#overlay{position:fixed;inset:0;z-index:10;pointer-events:none;display:flex;flex-direction:column;justify-content:space-between}
+#topBar{pointer-events:auto;background:linear-gradient(180deg,rgba(0,0,0,.75),transparent);padding:16px 16px 40px;color:#fff}
+#topBar h1{font-size:15px;font-weight:800;letter-spacing:.3px}
+#topBar h1 span{color:#FFD700}
+#status{font-size:12px;color:#ccc;margin-top:4px;min-height:16px}
+#measureList{pointer-events:auto;background:rgba(20,20,20,.92);border-radius:14px 14px 0 0;padding:14px 16px 10px;max-height:40vh;overflow-y:auto}
+#measureList h2{font-size:11px;color:#999;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px}
+.mrow{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.08);color:#fff;font-size:14px}
+.mrow:last-child{border-bottom:none}
+.mrow b{color:#FFD700;font-variant-numeric:tabular-nums}
+.mrow .del{color:#888;font-size:18px;padding:4px 8px}
+#bottomBar{pointer-events:auto;padding:14px 16px calc(14px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:10px}
+#liveReading{text-align:center;background:rgba(0,0,0,.7);border-radius:10px;padding:10px;color:#fff;font-size:13px}
+#liveReading b{color:#FFD700;font-size:20px}
+.btnrow{display:flex;gap:10px}
+.btn{flex:1;padding:16px;border:none;border-radius:12px;font-size:15px;font-weight:800;cursor:pointer}
+.btn.primary{background:#FFD700;color:#1a1a1a}
+.btn.secondary{background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.3)}
+.btn.danger{background:rgba(200,40,40,.85);color:#fff}
+.btn:disabled{opacity:.35}
+#startScreen{position:fixed;inset:0;z-index:20;background:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;color:#fff}
+#startScreen .logo{font-size:26px;font-weight:900;margin-bottom:6px}
+#startScreen .logo span{color:#FFD700}
+#startScreen p{color:#aaa;font-size:14px;line-height:1.6;max-width:340px;margin:14px 0 22px}
+#startScreen .err{color:#ff6b6b;font-size:13px;margin-top:16px;max-width:340px;display:none}
+#reticle{display:none}
+canvas{display:block}
+.dot{width:14px;height:14px;border-radius:50%;background:#FFD700;border:2px solid #1a1a1a}
+#saveSheet{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.6);display:none;align-items:flex-end}
+#saveSheet.open{display:flex}
+#saveCard{background:#fff;width:100%;border-radius:18px 18px 0 0;padding:20px 18px calc(20px + env(safe-area-inset-bottom))}
+#saveCard h3{font-size:16px;margin-bottom:14px;color:#1a1a1a}
+#saveCard label{font-size:12px;color:#666;display:block;margin:10px 0 4px}
+#saveCard input{width:100%;padding:12px;border:1.5px solid #ddd;border-radius:8px;font-size:15px}
+#saveCard .dims{background:#f4f5f7;border-radius:10px;padding:12px;margin-top:12px;font-size:14px;color:#333}
+#saveCard .dims b{color:#1a1a1a}
+</style>
+</head>
+<body>
+
+<div id="startScreen">
+  <div class="logo">TECH<span>PLAST</span> Измерител</div>
+  <p>AR измерване на отвори директно с камерата. Тапни две точки, за да измериш ширина и височина. Изисква Android + Chrome с ARCore.</p>
+  <button class="btn primary" id="startBtn" style="max-width:280px">📷 Стартирай AR сесия</button>
+  <div class="err" id="startErr"></div>
+</div>
+
+<div id="overlay" style="display:none">
+  <div id="topBar">
+    <h1>TECH<span>PLAST</span> Измерител</h1>
+    <div id="status">Насочи камерата към пода/стената, докато откриe повърхност…</div>
+  </div>
+
+  <div style="flex:1"></div>
+
+  <div id="bottomBar">
+    <div id="liveReading">Тапни първа точка</div>
+    <div class="btnrow">
+      <button class="btn secondary" id="undoBtn" disabled>↺ Отмени</button>
+      <button class="btn primary" id="saveBtn" disabled>💾 Запази размер</button>
+    </div>
+    <button class="btn danger" id="exitBtn">Изход от AR</button>
+  </div>
+
+  <div id="measureList">
+    <h2>Записани размери (<span id="mCount">0</span>)</h2>
+    <div id="mList"></div>
+  </div>
+</div>
+
+<div id="saveSheet">
+  <div id="saveCard">
+    <h3>Запази измерването</h3>
+    <div class="dims" id="saveDims">—</div>
+    <label>Помещение / зона</label>
+    <input type="text" id="sRoom" placeholder="напр. Веранда" list="roomHist">
+    <datalist id="roomHist"></datalist>
+    <label>Позиция</label>
+    <input type="text" id="sName" placeholder="напр. П1 — изток">
+    <div class="btnrow" style="margin-top:16px">
+      <button class="btn secondary" id="cancelSave">Отказ</button>
+      <button class="btn primary" id="confirmSave">Запази</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===== TechPlast AR Измерител ===== */
+/* Реализация по стандартния WebXR hit-test модел (W3C WebXR Device API + AR Module).
+   ⚠️ Не е тествано с реален камера/AR хардуер от Claude — изисква проверка на реално устройство. */
+
+let xrSession = null, xrRefSpace = null, hitTestSource = null, gl = null;
+let points = [];       // текущо поставените точки (макс 2, за едно измерение)
+let measurements = []; // всички запазени измервания в тази сесия
+let lastHitPose = null;
+
+const $ = id => document.getElementById(id);
+
+function dist3(a, b) {
+  const dx = a[0]-b[0], dy = a[1]-b[1], dz = a[2]-b[2];
+  return Math.sqrt(dx*dx + dy*dy + dz*dz);
+}
+
+async function checkSupport() {
+  if (!('xr' in navigator)) return { ok:false, reason:"navigator.xr липсва — браузърът не поддържа WebXR изобщо." };
+  try {
+    const supported = await navigator.xr.isSessionSupported('immersive-ar');
+    if (!supported) return { ok:false, reason:"immersive-ar не се поддържа от това устройство/браузър." };
+    return { ok:true };
+  } catch(e) {
+    return { ok:false, reason:"Грешка при проверка на AR поддръжка: " + e.message };
+  }
+}
+
+async function startAR() {
+  const support = await checkSupport();
+  if (!support.ok) {
+    $('startErr').textContent = "⚠️ " + support.reason + " Провери: Chrome актуализиран, Google Play Services for AR инсталиран, HTTPS адрес (не file://).";
+    $('startErr').style.display = 'block';
+    return;
+  }
+
+  const canvas = document.createElement('canvas');
+  document.body.appendChild(canvas);
+  gl = canvas.getContext('webgl', { xrCompatible: true });
+  if (!gl) { $('startErr').textContent = "⚠️ WebGL не може да се инициализира на това устройство."; $('startErr').style.display='block'; return; }
+
+  try {
+    xrSession = await navigator.xr.requestSession('immersive-ar', {
+      requiredFeatures: ['hit-test', 'local-floor'],
+    });
+  } catch(e) {
+    $('startErr').textContent = "⚠️ Не успях да стартирам AR сесия: " + e.message;
+    $('startErr').style.display = 'block';
+    return;
+  }
+
+  $('startScreen').style.display = 'none';
+  $('overlay').style.display = 'flex';
+
+  await xrSession.updateRenderState({ baseLayer: new XRWebGLLayer(xrSession, gl) });
+  xrRefSpace = await xrSession.requestReferenceSpace('local-floor');
+  const viewerSpace = await xrSession.requestReferenceSpace('viewer');
+  hitTestSource = await xrSession.requestHitTestSource({ space: viewerSpace });
+
+  xrSession.addEventListener('end', onSessionEnd);
+  xrSession.addEventListener('select', onSelect);
+
+  xrSession.requestAnimationFrame(onXRFrame);
+}
+
+function onSelect() {
+  if (!lastHitPose) return;
+  const p = lastHitPose.transform.position;
+  points.push([p.x, p.y, p.z]);
+  if (points.length > 2) points = [points[1], [p.x,p.y,p.z]]; // пазим последните 2
+
+  if (points.length === 2) {
+    const d = dist3(points[0], points[1]);
+    $('liveReading').innerHTML = `Измерено: <b>${(d*100).toFixed(1)} см</b>`;
+    $('saveBtn').disabled = false;
+  } else {
+    $('liveReading').textContent = "Тапни втора точка";
+    $('saveBtn').disabled = true;
+  }
+  $('undoBtn').disabled = points.length === 0;
+}
+
+function onXRFrame(t, frame) {
+  xrSession.requestAnimationFrame(onXRFrame);
+  const pose = frame.getViewerPose(xrRefSpace);
+  if (!pose) return;
+
+  const glLayer = xrSession.renderState.baseLayer;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  const hitResults = frame.getHitTestResults(hitTestSource);
+  if (hitResults.length > 0) {
+    lastHitPose = hitResults[0].getPose(xrRefSpace);
+    $('status').textContent = "Повърхност открита — тапни екрана, за да поставиш точка.";
+  } else {
+    lastHitPose = null;
+    $('status').textContent = "Търся повърхност… движи телефона бавно.";
+  }
+}
+
+function onSessionEnd() {
+  $('overlay').style.display = 'none';
+  $('startScreen').style.display = 'flex';
+  points = [];
+  document.querySelectorAll('canvas').forEach(c=>c.remove());
+}
+
+$('startBtn').addEventListener('click', startAR);
+$('exitBtn').addEventListener('click', () => xrSession && xrSession.end());
+$('undoBtn').addEventListener('click', () => {
+  points.pop();
+  $('liveReading').textContent = points.length ? "Тапни втора точка" : "Тапни първа точка";
+  $('saveBtn').disabled = true;
+  $('undoBtn').disabled = points.length === 0;
+});
+
+$('saveBtn').addEventListener('click', () => {
+  const d = dist3(points[0], points[1]);
+  $('saveDims').innerHTML = `Разстояние: <b>${(d*100).toFixed(1)} см</b>`;
+  $('saveSheet').classList.add('open');
+  $('sRoom').value = ''; $('sName').value = '';
+});
+$('cancelSave').addEventListener('click', () => $('saveSheet').classList.remove('open'));
+$('confirmSave').addEventListener('click', () => {
+  const d = dist3(points[0], points[1]);
+  measurements.push({
+    room: $('sRoom').value.trim() || '—',
+    name: $('sName').value.trim() || ('Измерване ' + (measurements.length+1)),
+    cm: Math.round(d*1000)/10,
+    ts: Date.now()
+  });
+  renderList();
+  $('saveSheet').classList.remove('open');
+  points = [];
+  $('liveReading').textContent = "Тапни първа точка";
+  $('saveBtn').disabled = true;
+  $('undoBtn').disabled = true;
+
+  // помним използваните помещения за автодовършване
+  const dl = $('roomHist');
+  const rooms = [...new Set(measurements.map(m=>m.room).filter(r=>r!=='—'))];
+  dl.innerHTML = rooms.map(r=>`<option value="${r}">`).join('');
+});
+
+function renderList() {
+  $('mCount').textContent = measurements.length;
+  $('mList').innerHTML = measurements.map((m,i) => `
+    <div class="mrow">
+      <span>${m.room} — ${m.name}</span>
+      <span><b>${m.cm} см</b> <span class="del" data-i="${i}">✕</span></span>
+    </div>`).join('') || '<div style="color:#888;font-size:13px;padding:8px 0">Още няма записани размери.</div>';
+  document.querySelectorAll('.del').forEach(el => el.addEventListener('click', e => {
+    measurements.splice(+e.target.dataset.i, 1);
+    renderList();
+  }));
+}
+renderList();
+if("serviceWorker" in navigator && location.protocol.startsWith("http")){
+  navigator.serviceWorker.register("service-worker.js").catch(()=>{});
+}
+</script>
+</body>
+</html>
