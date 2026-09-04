@@ -47,6 +47,11 @@ canvas{display:block}
 #saveCard input{width:100%;padding:12px;border:1.5px solid #ddd;border-radius:8px;font-size:15px}
 #saveCard .dims{background:#f4f5f7;border-radius:10px;padding:12px;margin-top:12px;font-size:14px;color:#333}
 #saveCard .dims b{color:#1a1a1a}
+
+.install-btn{display:none;align-items:center;justify-content:center;gap:8px;max-width:280px;width:100%;
+  margin-top:14px;border:1.5px solid #FFD700;background:transparent;color:#FFD700;border-radius:12px;
+  padding:13px;font-size:14px;font-weight:800;cursor:pointer}
+.install-btn.visible{display:flex}
 </style>
 </head>
 <body>
@@ -54,7 +59,8 @@ canvas{display:block}
 <div id="startScreen">
   <div class="logo">TECH<span>PLAST</span> Измерител</div>
   <p>AR измерване на отвори директно с камерата. Тапни две точки, за да измериш ширина и височина. Изисква Android + Chrome с ARCore.</p>
-  <button class="btn primary" id="startBtn" style="max-width:280px">📷 Стартирай AR сесия</button>
+  <button class="btn primary" id="startBtn" style="flex:none;max-width:280px;width:100%">📷 Стартирай AR сесия</button>
+  <button class="install-btn" id="installBtn">⬇️ Инсталирай на телефона</button>
   <div class="err" id="startErr"></div>
 </div>
 
@@ -255,6 +261,25 @@ function renderList() {
   }));
 }
 renderList();
+
+/* Директна инсталация — улавяме системния prompt вместо да чакаме потребителят да намери менюто сам */
+let deferredInstall = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredInstall = e;
+  document.getElementById("installBtn").classList.add("visible");
+});
+document.getElementById("installBtn").addEventListener("click", async () => {
+  if (!deferredInstall) return;
+  deferredInstall.prompt();
+  const { outcome } = await deferredInstall.userChoice;
+  if (outcome === "accepted") document.getElementById("installBtn").classList.remove("visible");
+  deferredInstall = null;
+});
+window.addEventListener("appinstalled", () => {
+  document.getElementById("installBtn").classList.remove("visible");
+});
+
 if("serviceWorker" in navigator && location.protocol.startsWith("http")){
   navigator.serviceWorker.register("service-worker.js").catch(()=>{});
 }
