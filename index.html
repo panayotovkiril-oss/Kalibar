@@ -22,6 +22,12 @@ html,body{height:100%;overflow:hidden;background:#000;font-family:-apple-system,
 .mrow:last-child{border-bottom:none}
 .mrow b{color:#FFD700;font-variant-numeric:tabular-nums}
 .mrow .del{color:#888;font-size:18px;padding:4px 8px}
+.wa-btn{float:right;background:#25D366;color:#fff;border:none;border-radius:20px;
+  padding:6px 12px;font-size:11px;font-weight:800;cursor:pointer}
+.wa-btn:active{opacity:.8}
+.kb-btn{float:right;background:#FFD700;color:#1a1a1a;border:none;border-radius:20px;
+  padding:6px 12px;font-size:11px;font-weight:800;cursor:pointer;margin-right:6px}
+.kb-btn:active{opacity:.8}
 #bottomBar{pointer-events:auto;padding:14px 16px calc(14px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:10px}
 #liveReading{text-align:center;background:rgba(0,0,0,.7);border-radius:10px;padding:10px;color:#fff;font-size:13px}
 #liveReading b{color:#FFD700;font-size:20px}
@@ -29,6 +35,8 @@ html,body{height:100%;overflow:hidden;background:#000;font-family:-apple-system,
 .btn{flex:1;padding:16px;border:none;border-radius:12px;font-size:15px;font-weight:800;cursor:pointer}
 .btn.primary{background:#FFD700;color:#1a1a1a}
 .btn.secondary{background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.3)}
+#typeChoice .btn.secondary{background:#f0f0f0;color:#333;border:1.5px solid #ddd}
+#typeChoice .btn.secondary.active{background:#1a1a1a;color:#FFD700;border-color:#1a1a1a}
 .btn.danger{background:rgba(200,40,40,.85);color:#fff}
 .btn:disabled{opacity:.35}
 #startScreen{position:fixed;inset:0;z-index:20;background:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;color:#fff}
@@ -36,7 +44,15 @@ html,body{height:100%;overflow:hidden;background:#000;font-family:-apple-system,
 #startScreen .logo span{color:#FFD700}
 #startScreen p{color:#aaa;font-size:14px;line-height:1.6;max-width:340px;margin:14px 0 22px}
 #startScreen .err{color:#ff6b6b;font-size:13px;margin-top:16px;max-width:340px;display:none}
-#reticle{display:none}
+#reticle{position:fixed;width:26px;height:26px;margin-left:-13px;margin-top:-13px;
+  border:2.5px solid #FFD700;border-radius:50%;pointer-events:none;z-index:15;display:none;
+  box-shadow:0 0 0 2px rgba(0,0,0,.4)}
+#reticle::before,#reticle::after{content:"";position:absolute;background:#FFD700}
+#reticle::before{left:50%;top:-6px;width:2px;height:6px;margin-left:-1px}
+#reticle::after{left:50%;bottom:-6px;width:2px;height:6px;margin-left:-1px}
+#planeSvg{position:fixed;inset:0;z-index:12;pointer-events:none;width:100%;height:100%}
+.plane-poly{fill:rgba(58,110,165,.22);stroke:#3a6ea5;stroke-width:1.5}
+.plane-poly.horizontal{fill:rgba(246,201,14,.16);stroke:#FFD700}
 canvas{display:block}
 .dot{width:14px;height:14px;border-radius:50%;background:#FFD700;border:2px solid #1a1a1a}
 #saveSheet{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.6);display:none;align-items:flex-end}
@@ -64,6 +80,8 @@ canvas{display:block}
   <div class="err" id="startErr"></div>
 </div>
 
+<div id="reticle"></div>
+<svg id="planeSvg"></svg>
 <div id="overlay" style="display:none">
   <div id="topBar">
     <h1>TECH<span>PLAST</span> Измерител</h1>
@@ -82,7 +100,10 @@ canvas{display:block}
   </div>
 
   <div id="measureList">
-    <h2>Записани размери (<span id="mCount">0</span>)</h2>
+    <h2>Записани размери (<span id="mCount">0</span>)
+      <button class="wa-btn" id="waBtn" type="button">📤 WhatsApp</button>
+      <button class="kb-btn" id="kbBtn" type="button">📲 В КАЛИБЪР</button>
+    </h2>
     <div id="mList"></div>
   </div>
 </div>
@@ -91,7 +112,12 @@ canvas{display:block}
   <div id="saveCard">
     <h3>Запази измерването</h3>
     <div class="dims" id="saveDims">—</div>
-    <label>Помещение / зона</label>
+    <label>Тип (автоматично предложен — коригирай при нужда)</label>
+    <div class="btnrow" id="typeChoice">
+      <button type="button" class="btn secondary" id="typeWindowBtn" style="flex:1">🪟 Прозорец</button>
+      <button type="button" class="btn secondary" id="typeDoorBtn" style="flex:1">🚪 Врата</button>
+    </div>
+    <label style="margin-top:12px">Помещение / зона</label>
     <input type="text" id="sRoom" placeholder="напр. Веранда" list="roomHist">
     <datalist id="roomHist"></datalist>
     <label>Позиция</label>
@@ -145,8 +171,12 @@ async function startAR() {
   if (!gl) { $('startErr').textContent = "⚠️ WebGL не може да се инициализира на това устройство."; $('startErr').style.display='block'; return; }
 
   try {
+    /* DOM Overlay е ЗАДЪЛЖИТЕЛНО за да се вижда каквото и да е HTML (бутони, текст) върху камерата.
+       Без него AR сесията работи "невидимо" — камерата се показва, но целият интерфейс изчезва. */
     xrSession = await navigator.xr.requestSession('immersive-ar', {
       requiredFeatures: ['hit-test', 'local-floor'],
+      optionalFeatures: ['dom-overlay', 'plane-detection'],
+      domOverlay: { root: document.getElementById('overlay') },
     });
   } catch(e) {
     $('startErr').textContent = "⚠️ Не успях да стартирам AR сесия: " + e.message;
@@ -156,6 +186,12 @@ async function startAR() {
 
   $('startScreen').style.display = 'none';
   $('overlay').style.display = 'flex';
+
+  if (xrSession.domOverlayState) {
+    console.log("DOM Overlay активен, режим:", xrSession.domOverlayState.type);
+  } else {
+    $('status').textContent = "⚠️ DOM Overlay не се поддържа — интерфейсът може да остане невидим на този браузър.";
+  }
 
   await xrSession.updateRenderState({ baseLayer: new XRWebGLLayer(xrSession, gl) });
   xrRefSpace = await xrSession.requestReferenceSpace('local-floor');
@@ -168,6 +204,20 @@ async function startAR() {
   xrSession.requestAnimationFrame(onXRFrame);
 }
 
+/* Прагът, разделящ "врата" от "прозорец": долният ръб на вратата опира в пода (Y≈0
+   в local-floor рамката), докато прозорецът има первазна височина над пода. */
+const FLOOR_THRESHOLD_M = 0.20; // 20см — под това = врата, над = прозорец
+
+function rectFromCorners(a, b) {
+  const width  = Math.hypot(a[0]-b[0], a[2]-b[2]); // хоризонтално разстояние (X-Z), без височина
+  const height = Math.abs(a[1]-b[1]);
+  const bottomY = Math.min(a[1], b[1]); // по-ниската точка спрямо пода
+  return {
+    width, height, bottomY,
+    type: bottomY < FLOOR_THRESHOLD_M ? "door" : "window",
+  };
+}
+
 function onSelect() {
   if (!lastHitPose) return;
   const p = lastHitPose.transform.position;
@@ -175,14 +225,42 @@ function onSelect() {
   if (points.length > 2) points = [points[1], [p.x,p.y,p.z]]; // пазим последните 2
 
   if (points.length === 2) {
-    const d = dist3(points[0], points[1]);
-    $('liveReading').innerHTML = `Измерено: <b>${(d*100).toFixed(1)} см</b>`;
+    const r = rectFromCorners(points[0], points[1]);
+    const typeLbl = r.type === "door" ? "🚪 Врата (долният ръб опира в пода)" : "🪟 Прозорец (первазна височина)";
+    $('liveReading').innerHTML =
+      `<b>${(r.width*100).toFixed(1)} × ${(r.height*100).toFixed(1)} см</b><br>
+       <span style="font-size:11.5px;opacity:.85">${typeLbl} · височина на первaза ${(r.bottomY*100).toFixed(0)}см</span>`;
     $('saveBtn').disabled = false;
   } else {
-    $('liveReading').textContent = "Тапни втора точка";
+    $('liveReading').textContent = "Тапни срещуположния ъгъл на отвора";
     $('saveBtn').disabled = true;
   }
   $('undoBtn').disabled = points.length === 0;
+}
+
+/* Проектира 3D точка (в reference space) до 2D екранна позиция, ползвайки
+   истинската view/projection матрица на активния кадър — стандартният WebGL начин. */
+function projectToScreen(point3D, view, canvasW, canvasH) {
+  const vp = view.projectionMatrix;
+  const vt = view.transform.inverse.matrix; // world → view space
+  const x = point3D[0], y = point3D[1], z = point3D[2];
+  // world → view (умножение с 4×4, column-major)
+  const vx = vt[0]*x + vt[4]*y + vt[8]*z  + vt[12];
+  const vy = vt[1]*x + vt[5]*y + vt[9]*z  + vt[13];
+  const vz = vt[2]*x + vt[6]*y + vt[10]*z + vt[14];
+  const vw = vt[3]*x + vt[7]*y + vt[11]*z + vt[15];
+  // view → clip
+  const cx = vp[0]*vx + vp[4]*vy + vp[8]*vz  + vp[12]*vw;
+  const cy = vp[1]*vx + vp[5]*vy + vp[9]*vz  + vp[13]*vw;
+  const cw = vp[3]*vx + vp[7]*vy + vp[11]*vz + vp[15]*vw;
+  if (cw <= 0) return null; // точката е зад камерата
+  // clip → NDC → екранни пиксели (CSS, не framebuffer, затова делим на devicePixelRatio)
+  const ndcX = cx / cw, ndcY = cy / cw;
+  const dpr = window.devicePixelRatio || 1;
+  return {
+    x: (ndcX * 0.5 + 0.5) * canvasW / dpr,
+    y: (1 - (ndcY * 0.5 + 0.5)) * canvasH / dpr,
+  };
 }
 
 function onXRFrame(t, frame) {
@@ -193,19 +271,58 @@ function onXRFrame(t, frame) {
   const glLayer = xrSession.renderState.baseLayer;
   gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  const view = pose.views[0];
+
+  /* Детектор на повърхности (Plane Detection) — ЕКСПЕРИМЕНТАЛНА функция, може да не работи
+     на всеки браузър/устройство. Ако липсва, приложението просто продължава без нея —
+     прицелът и измерването работят независимо. */
+  try {
+    if (frame.detectedPlanes) {
+      let svgHTML = '';
+      frame.detectedPlanes.forEach(plane => {
+        const planePose = frame.getPose(plane.planeSpace, xrRefSpace);
+        if (!planePose || !plane.polygon) return;
+        const m = planePose.transform.matrix;
+        const pts = plane.polygon.map(p => {
+          const wx = m[0]*p.x + m[4]*p.y + m[8]*p.z  + m[12];
+          const wy = m[1]*p.x + m[5]*p.y + m[9]*p.z  + m[13];
+          const wz = m[2]*p.x + m[6]*p.y + m[10]*p.z + m[14];
+          return projectToScreen([wx, wy, wz], view, glLayer.framebufferWidth, glLayer.framebufferHeight);
+        }).filter(p => p !== null);
+        if (pts.length < 3) return;
+        const cls = plane.orientation === 'horizontal' ? 'plane-poly horizontal' : 'plane-poly';
+        svgHTML += `<polygon class="${cls}" points="${pts.map(p=>p.x+','+p.y).join(' ')}"/>`;
+      });
+      $('planeSvg').innerHTML = svgHTML;
+    }
+  } catch(e) { /* тихо прескачаме — прицелът работи независимо */ }
 
   const hitResults = frame.getHitTestResults(hitTestSource);
+  const reticleEl = $('reticle');
   if (hitResults.length > 0) {
     lastHitPose = hitResults[0].getPose(xrRefSpace);
     $('status').textContent = "Повърхност открита — тапни екрана, за да поставиш точка.";
+
+    const p = lastHitPose.transform.position;
+    const scr = projectToScreen([p.x, p.y, p.z], view, glLayer.framebufferWidth, glLayer.framebufferHeight);
+    if (scr) {
+      reticleEl.style.display = 'block';
+      reticleEl.style.left = scr.x + 'px';
+      reticleEl.style.top = scr.y + 'px';
+    } else {
+      reticleEl.style.display = 'none';
+    }
   } else {
     lastHitPose = null;
+    reticleEl.style.display = 'none';
     $('status').textContent = "Търся повърхност… движи телефона бавно.";
   }
 }
 
 function onSessionEnd() {
   $('overlay').style.display = 'none';
+  $('reticle').style.display = 'none';
+  $('planeSvg').innerHTML = '';
   $('startScreen').style.display = 'flex';
   points = [];
   document.querySelectorAll('canvas').forEach(c=>c.remove());
@@ -220,19 +337,35 @@ $('undoBtn').addEventListener('click', () => {
   $('undoBtn').disabled = points.length === 0;
 });
 
+let currentRect = null; // последно измереният правоъгълник, чака запис
+
 $('saveBtn').addEventListener('click', () => {
-  const d = dist3(points[0], points[1]);
-  $('saveDims').innerHTML = `Разстояние: <b>${(d*100).toFixed(1)} см</b>`;
+  currentRect = rectFromCorners(points[0], points[1]);
+  $('saveDims').innerHTML =
+    `Размер: <b>${(currentRect.width*100).toFixed(1)} × ${(currentRect.height*100).toFixed(1)} см</b><br>
+     <span style="font-size:12px;color:#888">Первазна височина: ${(currentRect.bottomY*100).toFixed(0)}см</span>`;
+  setTypeChoice(currentRect.type);
   $('saveSheet').classList.add('open');
   $('sRoom').value = ''; $('sName').value = '';
 });
+
+function setTypeChoice(type) {
+  currentRect.type = type;
+  $('typeWindowBtn').classList.toggle('active', type === 'window');
+  $('typeDoorBtn').classList.toggle('active', type === 'door');
+}
+$('typeWindowBtn').addEventListener('click', () => setTypeChoice('window'));
+$('typeDoorBtn').addEventListener('click', () => setTypeChoice('door'));
+
 $('cancelSave').addEventListener('click', () => $('saveSheet').classList.remove('open'));
 $('confirmSave').addEventListener('click', () => {
-  const d = dist3(points[0], points[1]);
   measurements.push({
     room: $('sRoom').value.trim() || '—',
     name: $('sName').value.trim() || ('Измерване ' + (measurements.length+1)),
-    cm: Math.round(d*1000)/10,
+    type: currentRect.type,
+    widthCm: Math.round(currentRect.width*1000)/10,
+    heightCm: Math.round(currentRect.height*1000)/10,
+    sillCm: Math.round(currentRect.bottomY*1000)/10,
     ts: Date.now()
   });
   renderList();
@@ -250,17 +383,58 @@ $('confirmSave').addEventListener('click', () => {
 
 function renderList() {
   $('mCount').textContent = measurements.length;
-  $('mList').innerHTML = measurements.map((m,i) => `
+  $('mList').innerHTML = measurements.map((m,i) => {
+    const icon = m.type === 'door' ? '🚪' : '🪟';
+    return `
     <div class="mrow">
-      <span>${m.room} — ${m.name}</span>
-      <span><b>${m.cm} см</b> <span class="del" data-i="${i}">✕</span></span>
-    </div>`).join('') || '<div style="color:#888;font-size:13px;padding:8px 0">Още няма записани размери.</div>';
+      <span>${icon} ${m.room} — ${m.name}</span>
+      <span><b>${m.widthCm}×${m.heightCm} см</b> <span class="del" data-i="${i}">✕</span></span>
+    </div>`;
+  }).join('') || '<div style="color:#888;font-size:13px;padding:8px 0">Още няма записани размери.</div>';
   document.querySelectorAll('.del').forEach(el => el.addEventListener('click', e => {
     measurements.splice(+e.target.dataset.i, 1);
     renderList();
   }));
 }
 renderList();
+
+/* Изпращане на списъка през WhatsApp — отваря директно с готов текст, без копиране на ръка. */
+$('waBtn').addEventListener('click', () => {
+  if (!measurements.length) { alert('Още няма записани размери за изпращане.'); return; }
+  const lines = ['*TechPlast — измервания на терен*', ''];
+  const групи = {};
+  measurements.forEach(m => { (групи[m.room] = групи[m.room] || []).push(m); });
+  Object.entries(групи).forEach(([room, list]) => {
+    lines.push(`_${room}_`);
+    list.forEach(m => {
+      const icon = m.type === 'door' ? '🚪' : '🪟';
+      lines.push(`${icon} ${m.name}: ${m.widthCm}×${m.heightCm} см` +
+        (m.type === 'window' ? ` (первaз ${m.sillCm}см)` : ''));
+    });
+    lines.push('');
+  });
+  lines.push(`Общо: ${measurements.length} бр.`);
+  const text = encodeURIComponent(lines.join('\n'));
+  window.open(`https://wa.me/?text=${text}`, '_blank');
+});
+
+/* Директен трансфер към КАЛИБЪР — линк с вградени данни, не истински файл (двете
+   приложения са отделни PWA-та). КАЛИБЪР чете параметъра ?ar= при зареждане и предлага импорт. */
+const KALIBAR_URL = 'https://panayotovkiril-oss.github.io/Kalibar/';
+$('kbBtn').addEventListener('click', () => {
+  if (!measurements.length) { alert('Още няма записани размери за изпращане.'); return; }
+  const payload = measurements.map(m => ({
+    room: m.room === '—' ? '' : m.room,
+    name: m.name,
+    type: m.type,       // "door" | "window" — КАЛИБЪР го превежда към своя тип секция
+    w: m.widthCm,        // мм в КАЛИБЪР, но тук пазим в см — превръщаме при кодиране
+    h: m.heightCm,
+  }));
+  // см → мм за КАЛИБЪР
+  payload.forEach(p => { p.w = Math.round(p.w * 10); p.h = Math.round(p.h * 10); });
+  const encoded = encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(payload)))));
+  window.open(`${KALIBAR_URL}?ar=${encoded}`, '_blank');
+});
 
 /* Директна инсталация — улавяме системния prompt вместо да чакаме потребителят да намери менюто сам */
 let deferredInstall = null;
